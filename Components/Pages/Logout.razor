@@ -1,0 +1,19 @@
+@page "/logout"
+
+@using Microsoft.AspNetCore.Identity
+@using BudgetEase.Models
+
+@inject SignInManager<ApplicationUser> SignInManager
+@inject NavigationManager Navigation
+
+<p>Signing you out...</p>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        await SignInManager.SignOutAsync();
+        Navigation.NavigateTo("/login", replace: true);
+    }
+}
+
+

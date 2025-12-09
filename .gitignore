@@ -1,0 +1,32 @@
+## Build and artifacts
+bin/
+obj/
+
+## IDE configuration
+.vs/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+## Logs and temporary files
+logs/
+*.log
+
+## Publish and releases
+publish/
+Releases/
+
+## Local database files
+*.db
+*.sqlite
+*.sqlite3
+*.mdf
+*.ldf
+
+## Environment variables / secrets
+.env
+.env.*
+
+

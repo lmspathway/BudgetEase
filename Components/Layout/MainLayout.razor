@@ -1,4 +1,7 @@
 ﻿@inherits LayoutComponentBase
+@using Microsoft.AspNetCore.Components.Authorization
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject NavigationManager Navigation
 
 <div class="app-shell">
     <header class="app-header px-4">
@@ -14,26 +17,51 @@
         </div>
 
         <div class="app-header-right">
-            <div class="app-header-period">
-                <span class="label">Period</span>
-                <select class="form-select form-select-sm">
-                    <option>This month</option>
-                    <option>Last month</option>
-                    <option>Last 3 months</option>
-                    <option>Custom...</option>
-                </select>
-            </div>
+            <AuthorizeView>
+                <Authorized>
+                    <div class="app-header-period">
+                        <span class="label">Period</span>
+                        <select class="form-select form-select-sm">
+                            <option>This month</option>
+                            <option>Last month</option>
+                            <option>Last 3 months</option>
+                            <option>Custom...</option>
+                        </select>
+                    </div>
 
-            <div class="app-header-profile">
-                <div class="avatar-placeholder">BE</div>
-            </div>
+                    <div class="app-header-profile dropdown">
+                        <button class="avatar-placeholder dropdown-toggle"
+                                type="button"
+                                data-bs-toggle="dropdown"
+                                aria-expanded="false">
+                            @GetUserInitial()
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li class="dropdown-item-text small text-muted px-3">
+                                Signed in as @GetUserDisplayName()
+                            </li>
+                            <li><hr class="dropdown-divider" /></li>
+                            <li>
+                                <a class="dropdown-item" href="/logout">Logout</a>
+                            </li>
+                        </ul>
+                    </div>
+                </Authorized>
+                <NotAuthorized>
+                    @* No period selector or avatar while not authenticated *@
+                </NotAuthorized>
+            </AuthorizeView>
         </div>
     </header>
 
     <div class="app-body">
-        <aside class="app-sidebar">
-            <NavMenu />
-        </aside>
+        <AuthorizeView>
+            <Authorized>
+                <aside class="app-sidebar">
+                    <NavMenu />
+                </aside>
+            </Authorized>
+        </AuthorizeView>
 
         <main class="app-main">
             <article class="app-main-inner">
@@ -52,3 +80,44 @@
     <a href="." class="reload">Reload</a>
     <span class="dismiss">🗙</span>
 </div>
+
+@code {
+    private string GetUserInitial()
+    {
+        if (AuthenticationStateProvider is null)
+        {
+            return "BE";
+        }
+
+        var authStateTask = AuthenticationStateProvider.GetAuthenticationStateAsync();
+        authStateTask.Wait();
+        var user = authStateTask.Result.User;
+
+        if (user.Identity?.IsAuthenticated != true)
+        {
+            return "BE";
+        }
+
+        var name = user.Identity.Name;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "BE";
+        }
+
+        return char.ToUpperInvariant(name[0]).ToString();
+    }
+
+    private string GetUserDisplayName()
+    {
+        var authStateTask = AuthenticationStateProvider.GetAuthenticationStateAsync();
+        authStateTask.Wait();
+        var user = authStateTask.Result.User;
+
+        if (user.Identity?.IsAuthenticated != true)
+        {
+            return "Guest";
+        }
+
+        return user.Identity.Name ?? "User";
+    }
+}

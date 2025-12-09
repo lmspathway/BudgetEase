@@ -2,9 +2,13 @@
 @rendermode InteractiveServer
 
 @using System.ComponentModel.DataAnnotations
-@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.JSInterop
+
+@attribute [AllowAnonymous]
 
 @inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
 
 <h1>Sign in</h1>
 
@@ -54,26 +58,28 @@
     private async Task HandleLoginAsync()
     {
         _errorMessage = null;
+
+        // Usar JavaScript para fazer POST que inclui cookies automaticamente
+        var loginData = new
+        {
+            email = _model.Email,
+            password = _model.Password,
+            rememberMe = _model.RememberMe
+        };
+
         try
         {
-            using var http = new HttpClient
-            {
-                BaseAddress = new Uri(Navigation.BaseUri)
-            };
+            var response = await JSRuntime.InvokeAsync<string>("loginUser", loginData);
 
-            var response = await http.PostAsJsonAsync("auth/login", _model);
-
-            if (response.IsSuccessStatusCode)
+            if (response == "success")
             {
-                // Cookie is set on the /auth/login response; force full reload so the new cookie is used.
+                // Cookie foi criado, redireciona
                 Navigation.NavigateTo("/", forceLoad: true);
-                return;
             }
-
-            var message = await response.Content.ReadAsStringAsync();
-            _errorMessage = string.IsNullOrWhiteSpace(message)
-                ? "Invalid email or password. Please try again."
-                : message;
+            else
+            {
+                _errorMessage = response ?? "Invalid email or password. Please try again.";
+            }
         }
         catch (Exception ex)
         {

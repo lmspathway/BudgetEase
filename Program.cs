@@ -1,6 +1,10 @@
 using BudgetEase.Components;
 using BudgetEase.Data;
 using BudgetEase.Models;
+using BudgetEase.Services;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -25,15 +29,40 @@ builder.Services
         options.Password.RequireUppercase = false;
         options.Password.RequireDigit = true;
     })
-    .AddEntityFrameworkStores<BudgetEaseDbContext>()
     .AddSignInManager()
+    .AddEntityFrameworkStores<BudgetEaseDbContext>()
     .AddDefaultTokenProviders();
 
 builder.Services
-    .AddAuthentication()
-    .AddIdentityCookies();
+    .AddAuthentication(options =>
+    {
+        options.DefaultScheme = IdentityConstants.ApplicationScheme;
+        options.DefaultAuthenticateScheme = IdentityConstants.ApplicationScheme;
+        options.DefaultChallengeScheme = IdentityConstants.ApplicationScheme;
+    })
+    .AddCookie(IdentityConstants.ApplicationScheme, options =>
+    {
+        options.SlidingExpiration = true;
+        options.LoginPath = "/login";
+        options.AccessDeniedPath = "/login";
+        options.Cookie.Name = ".AspNetCore.Identity.Application";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest; // Em dev, permite HTTP
+    });
 
+// HttpContext access for AuthenticationStateProvider
+builder.Services.AddHttpContextAccessor();
+
+// Blazor authentication: read from Identity cookie via HttpContext
+// Using RevalidatingServerAuthenticationStateProvider for proper Blazor Server integration
+builder.Services.AddScoped<BudgetEaseAuthStateProvider>();
+builder.Services.AddScoped<AuthenticationStateProvider>(sp =>
+    sp.GetRequiredService<BudgetEaseAuthStateProvider>());
+
+// Authorization + cascading auth state for Blazor
 builder.Services.AddAuthorization();
+builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpClient();
 
 builder.Services.AddRazorComponents()
@@ -61,11 +90,14 @@ app.UseHttpsRedirection();
 
 app.UseAuthentication();
 app.UseAuthorization();
-
 app.UseAntiforgery();
 
+app.MapStaticAssets();
+app.MapRazorComponents<App>()
+    .AddInteractiveServerRenderMode();
+
+// Minimal API endpoint for login using Identity + cookies.
 app.MapPost("/auth/login", async (
-        HttpContext httpContext,
         SignInManager<ApplicationUser> signInManager,
         LoginRequest request) =>
     {
@@ -77,6 +109,8 @@ app.MapPost("/auth/login", async (
 
         if (result.Succeeded)
         {
+            // Cookie de autenticação foi criado pelo SignInManager no HttpContext
+            // O cookie será enviado automaticamente na resposta HTTP
             return Results.Ok();
         }
 
@@ -87,10 +121,6 @@ app.MapPost("/auth/login", async (
 
         return Results.BadRequest("Invalid email or password.");
     });
-
-app.MapStaticAssets();
-app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
 
 app.Run();
 

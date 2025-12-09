@@ -1,11 +1,9 @@
 @page "/login"
-@attribute [AllowAnonymous]
+@rendermode InteractiveServer
 
 @using System.ComponentModel.DataAnnotations
-@using Microsoft.AspNetCore.Identity
-@using BudgetEase.Models
+@using System.Net.Http.Json
 
-@inject SignInManager<ApplicationUser> SignInManager
 @inject NavigationManager Navigation
 
 <h1>Sign in</h1>
@@ -16,7 +14,7 @@
 
 <EditForm Model="_model" OnValidSubmit="HandleLoginAsync" FormName="login">
     <DataAnnotationsValidator />
-    <ValidationSummary />
+    <ValidationSummary /> 
 
     <div class="mb-3">
         <label class="form-label">Email</label>
@@ -56,26 +54,30 @@
     private async Task HandleLoginAsync()
     {
         _errorMessage = null;
-
-        var result = await SignInManager.PasswordSignInAsync(
-            userName: _model.Email,
-            password: _model.Password,
-            isPersistent: _model.RememberMe,
-            lockoutOnFailure: false);
-
-        if (result.Succeeded)
+        try
         {
-            Navigation.NavigateTo("/", replace: true);
-            return;
+            using var http = new HttpClient
+            {
+                BaseAddress = new Uri(Navigation.BaseUri)
+            };
+
+            var response = await http.PostAsJsonAsync("auth/login", _model);
+
+            if (response.IsSuccessStatusCode)
+            {
+                // Cookie is set on the /auth/login response; force full reload so the new cookie is used.
+                Navigation.NavigateTo("/", forceLoad: true);
+                return;
+            }
+
+            var message = await response.Content.ReadAsStringAsync();
+            _errorMessage = string.IsNullOrWhiteSpace(message)
+                ? "Invalid email or password. Please try again."
+                : message;
         }
-
-        if (result.IsLockedOut)
+        catch (Exception ex)
         {
-            _errorMessage = "Your account is temporarily locked due to multiple failed attempts. Please try again later.";
-        }
-        else
-        {
-            _errorMessage = "Invalid email or password. Please try again.";
+            _errorMessage = $"Unable to sign in right now. {ex.Message}";
         }
     }
 

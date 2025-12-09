@@ -34,11 +34,20 @@ builder.Services
     .AddIdentityCookies();
 
 builder.Services.AddAuthorization();
+builder.Services.AddHttpClient();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 var app = builder.Build();
+
+// Ensure SQLite database and schema are created at startup.
+// For now we use EnsureCreated to keep the setup simple (no migrations required yet).
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<BudgetEaseDbContext>();
+    dbContext.Database.EnsureCreated();
+}
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
@@ -55,8 +64,34 @@ app.UseAuthorization();
 
 app.UseAntiforgery();
 
+app.MapPost("/auth/login", async (
+        HttpContext httpContext,
+        SignInManager<ApplicationUser> signInManager,
+        LoginRequest request) =>
+    {
+        var result = await signInManager.PasswordSignInAsync(
+            request.Email,
+            request.Password,
+            request.RememberMe,
+            lockoutOnFailure: false);
+
+        if (result.Succeeded)
+        {
+            return Results.Ok();
+        }
+
+        if (result.IsLockedOut)
+        {
+            return Results.BadRequest("Your account is temporarily locked. Please try again later.");
+        }
+
+        return Results.BadRequest("Invalid email or password.");
+    });
+
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
+
+public record LoginRequest(string Email, string Password, bool RememberMe);

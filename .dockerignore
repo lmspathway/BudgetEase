@@ -1,0 +1,15 @@
+bin/
+obj/
+.vs/
+.vscode/
+**/*.user
+**/*.suo
+**/*.swp
+.git
+.gitignore
+Dockerfile
+*.db
+*.sqlite
+*.sqlite3
+
+

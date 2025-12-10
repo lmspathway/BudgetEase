@@ -1,4 +1,6 @@
-﻿<Router AppAssembly="typeof(Program).Assembly">
+﻿@using BudgetEase.Components.Pages
+
+<Router AppAssembly="typeof(Program).Assembly">
     <Found Context="routeData">
         <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
             <NotAuthorized>
@@ -7,4 +9,9 @@
         </AuthorizeRouteView>
         <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
+    <NotFound>
+        <LayoutView Layout="typeof(Layout.MainLayout)">
+            <NotFound />
+        </LayoutView>
+    </NotFound>
 </Router>

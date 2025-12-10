@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Security.Claims;
 using BudgetEase.Components;
 using BudgetEase.Data;
 using BudgetEase.Models;
@@ -6,7 +8,9 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Localization;
 using Microsoft.EntityFrameworkCore;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -60,6 +64,12 @@ builder.Services.AddScoped<BudgetEaseAuthStateProvider>();
 builder.Services.AddScoped<AuthenticationStateProvider>(sp =>
     sp.GetRequiredService<BudgetEaseAuthStateProvider>());
 
+// Domain services
+builder.Services.AddScoped<ITransactionService, TransactionService>();
+builder.Services.AddScoped<ICategoryService, CategoryService>();
+builder.Services.AddScoped<ISettingsService, SettingsService>();
+builder.Services.AddScoped<IDashboardService, DashboardService>();
+
 // Authorization + cascading auth state for Blazor
 builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
@@ -69,6 +79,18 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 var app = builder.Build();
+
+// Force US culture for dates (MM/dd/yyyy) while allowing explicit formatting for currency elsewhere.
+var defaultCulture = new CultureInfo("en-US");
+var localizationOptions = new RequestLocalizationOptions
+{
+    DefaultRequestCulture = new RequestCulture(defaultCulture),
+    SupportedCultures = new[] { defaultCulture },
+    SupportedUICultures = new[] { defaultCulture }
+};
+
+CultureInfo.DefaultThreadCurrentCulture = defaultCulture;
+CultureInfo.DefaultThreadCurrentUICulture = defaultCulture;
 
 // Ensure SQLite database and schema are created at startup.
 // For now we use EnsureCreated to keep the setup simple (no migrations required yet).
@@ -87,6 +109,7 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseRequestLocalization(localizationOptions);
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -132,6 +155,54 @@ app.MapPost("/auth/logout", async (SignInManager<ApplicationUser> signInManager)
         // O cookie será removido automaticamente na resposta HTTP
         return Results.Ok();
     });
+
+// Export all transactions for the current user as CSV.
+app.MapGet("/export/transactions", async (HttpContext httpContext, BudgetEaseDbContext dbContext) =>
+{
+    if (httpContext.User?.Identity?.IsAuthenticated != true)
+    {
+        return Results.Unauthorized();
+    }
+
+    var userIdClaim = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                     ?? httpContext.User.FindFirst(ClaimTypes.Name)?.Value;
+
+    if (!Guid.TryParse(userIdClaim, out var userId))
+    {
+        return Results.BadRequest("Unable to determine the current user.");
+    }
+
+    var transactions = await dbContext.Transactions
+        .AsNoTracking()
+        .Include(t => t.Category)
+        .Where(t => t.UserId == userId)
+        .OrderBy(t => t.Date)
+        .ThenBy(t => t.CreatedAt)
+        .ToListAsync();
+
+    var sb = new StringBuilder();
+    sb.AppendLine("Id,Date,Type,Category,Amount,Description");
+
+    foreach (var tx in transactions)
+    {
+        var categoryName = tx.Category?.Name ?? "Uncategorized";
+        var type = tx.Type.ToString();
+        var date = tx.Date.ToString("yyyy-MM-dd");
+        var amount = tx.Amount.ToString("0.00", CultureInfo.InvariantCulture);
+        var description = (tx.Description ?? string.Empty).Replace("\"", "\"\"");
+
+        sb.Append('"').Append(tx.Id).Append("\",")
+          .Append('"').Append(date).Append("\",")
+          .Append('"').Append(type).Append("\",")
+          .Append('"').Append(categoryName.Replace("\"", "\"\"")).Append("\",")
+          .Append('"').Append(amount).Append("\",")
+          .Append('"').Append(description).Append('"')
+          .AppendLine();
+    }
+
+    var bytes = Encoding.UTF8.GetBytes(sb.ToString());
+    return Results.File(bytes, "text/csv", "transactions.csv");
+});
 
 app.Run();
 

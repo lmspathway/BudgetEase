@@ -4,6 +4,13 @@
 <div class="app-shell">
     <header class="app-header px-4">
         <div class="app-header-left">
+            <button class="app-header-toggle d-inline d-md-none"
+                    type="button"
+                    aria-label="Toggle navigation"
+                    @onclick="ToggleMobileSidebar">
+                ☰
+            </button>
+
             <span class="app-logo">BudgetEase</span>
         </div>
 
@@ -19,7 +26,7 @@
     <div class="app-body">
         <AuthorizeView>
             <Authorized>
-                <aside class="app-sidebar">
+                <aside class="app-sidebar d-none d-md-block">
                     <NavMenu />
                 </aside>
             </Authorized>
@@ -37,9 +44,25 @@
     </footer>
 </div>
 
+@if (_isMobileSidebarOpen)
+{
+    <div class="modal-backdrop-custom" @onclick="ToggleMobileSidebar"></div>
+    <div class="mobile-sidebar">
+        <NavMenu />
+    </div>
+}
+
 <div id="blazor-error-ui" data-nosnippet>
     An unhandled error has occurred.
     <a href="." class="reload">Reload</a>
     <span class="dismiss">🗙</span>
 </div>
 
+@code {
+    private bool _isMobileSidebarOpen;
+
+    private void ToggleMobileSidebar()
+    {
+        _isMobileSidebarOpen = !_isMobileSidebarOpen;
+    }
+}

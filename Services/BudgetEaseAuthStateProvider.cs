@@ -15,7 +15,6 @@ namespace BudgetEase.Services;
 public class BudgetEaseAuthStateProvider : RevalidatingServerAuthenticationStateProvider
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
-    private readonly IAuthenticationService _authenticationService;
 
     public BudgetEaseAuthStateProvider(
         IHttpContextAccessor httpContextAccessor,
@@ -24,7 +23,6 @@ public class BudgetEaseAuthStateProvider : RevalidatingServerAuthenticationState
         : base(loggerFactory)
     {
         _httpContextAccessor = httpContextAccessor;
-        _authenticationService = authenticationService;
     }
 
     protected override TimeSpan RevalidationInterval => TimeSpan.FromMinutes(30);
@@ -43,37 +41,19 @@ public class BudgetEaseAuthStateProvider : RevalidatingServerAuthenticationState
         return Task.FromResult(false);
     }
 
-    public override async Task<AuthenticationState> GetAuthenticationStateAsync()
+    public override Task<AuthenticationState> GetAuthenticationStateAsync()
     {
         var httpContext = _httpContextAccessor.HttpContext;
-        
-        if (httpContext == null)
+
+        if (httpContext?.User?.Identity?.IsAuthenticated == true)
         {
-            // No HttpContext available - return anonymous
-            return new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity()));
+            // User has been authenticated by the cookie middleware, just use that principal.
+            return Task.FromResult(new AuthenticationState(httpContext.User));
         }
 
-        // Authenticate the request using the Identity cookie scheme
-        // This ensures the cookie is read and HttpContext.User is populated
-        var authenticateResult = await _authenticationService.AuthenticateAsync(
-            httpContext, 
-            IdentityConstants.ApplicationScheme);
-
-        if (authenticateResult?.Succeeded == true && authenticateResult.Principal?.Identity?.IsAuthenticated == true)
-        {
-            // User is authenticated via Identity cookie - return their ClaimsPrincipal
-            return new AuthenticationState(authenticateResult.Principal);
-        }
-
-        // Check HttpContext.User as fallback (should be populated by middleware)
-        if (httpContext.User?.Identity?.IsAuthenticated == true)
-        {
-            return new AuthenticationState(httpContext.User);
-        }
-
-        // User is not authenticated - return anonymous
-        // AuthorizeRouteView will handle redirect to /login
-        return new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity()));
+        // No user or not authenticated – return anonymous principal.
+        return Task.FromResult(
+            new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity())));
     }
 }
 

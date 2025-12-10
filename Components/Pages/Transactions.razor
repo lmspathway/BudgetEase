@@ -1,0 +1,521 @@
+@page "/transactions"
+@rendermode InteractiveServer
+@using System.Security.Claims
+@using System.ComponentModel.DataAnnotations
+@using BudgetEase.Models
+@using BudgetEase.Services
+@attribute [Authorize]
+
+@inject ITransactionService TransactionService
+@inject ICategoryService CategoryService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject NavigationManager NavigationManager
+
+<PageTitle>Transactions</PageTitle>
+
+<section class="transactions-root">
+    <header class="transactions-header">
+        <div>
+            <h1>Transactions</h1>
+            <p class="subtitle">Track all your incomes and expenses.</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-outline-light me-2" @onclick="ExportCsv">Export CSV</button>
+            <button class="btn btn-primary" @onclick="ShowCreateModal">Add transaction</button>
+        </div>
+    </header>
+
+    <section class="filters">
+        <div class="filter-group">
+            <label>Date from</label>
+            <InputDate class="form-control" @bind-Value="_filterFrom" />
+        </div>
+        <div class="filter-group">
+            <label>Date to</label>
+            <InputDate class="form-control" @bind-Value="_filterTo" />
+        </div>
+        <div class="filter-group">
+            <label>Category</label>
+            <select class="form-select" @bind="_filterCategoryId">
+                <option value="">All</option>
+                @foreach (var category in _categories)
+                {
+                    <option value="@category.Id">@category.Name</option>
+                }
+            </select>
+        </div>
+        <div class="filter-group">
+            <label>Type</label>
+            <select class="form-select" @bind="_filterType">
+                <option value="">All</option>
+                <option value="@TransactionType.Income">Income</option>
+                <option value="@TransactionType.Expense">Expense</option>
+            </select>
+        </div>
+        <div class="filter-actions">
+            <button class="btn btn-outline-light btn-sm" @onclick="ApplyFilters">Apply</button>
+            <button class="btn btn-link btn-sm" @onclick="ResetFilters">Reset</button>
+        </div>
+    </section>
+
+    @if (_isLoading)
+    {
+        <div class="transactions-loading">
+            <div class="spinner-border spinner-border-sm text-light" role="status"></div>
+            <span>Loading transactions...</span>
+        </div>
+    }
+    else if (_pagedTransactions.Count == 0)
+    {
+        <p class="empty-state">No transactions found for the selected filters.</p>
+    }
+    else
+    {
+        <div class="table-responsive transactions-table-wrapper">
+            <table class="table table-dark table-sm align-middle transactions-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Type</th>
+                        <th>Category</th>
+                        <th class="text-end">Amount</th>
+                        <th>Description</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var tx in _pagedTransactions)
+                    {
+                        var amountClass = tx.Type == TransactionType.Income ? "income" : "expense";
+                        var sign = tx.Type == TransactionType.Income ? "+" : "-";
+                        <tr>
+                            <td>@tx.Date.ToString("MM/dd/yyyy")</td>
+                            <td>
+                                <span class="badge @(tx.Type == TransactionType.Income ? "bg-success" : "bg-danger")">
+                                    @tx.Type
+                                </span>
+                            </td>
+                            <td>@(tx.Category?.Name ?? "Uncategorized")</td>
+                            <td class="text-end">
+                                <span class="@amountClass">@sign@tx.Amount.ToString("C2")</span>
+                            </td>
+                            <td class="description-cell">@tx.Description</td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-light me-1" @onclick="@(() => ShowEditModal(tx))">Edit</button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="@(() => ConfirmDelete(tx))">Delete</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (_totalPages > 1)
+        {
+            <nav class="pagination-nav">
+                <button class="btn btn-sm btn-outline-light" disabled="@(_currentPage == 1)" @onclick="PreviousPage">
+                    Prev
+                </button>
+                <span>Page @_currentPage of @_totalPages</span>
+                <button class="btn btn-sm btn-outline-light" disabled="@(_currentPage == _totalPages)" @onclick="NextPage">
+                    Next
+                </button>
+            </nav>
+        }
+    }
+
+    @if (_showModal)
+    {
+        <div class="modal-backdrop-custom" @onclick="CloseModal"></div>
+        <div class="modal-custom" @onclick:stopPropagation="true">
+            <header>
+                <h2>@(_editingTransactionId is null ? "Add transaction" : "Edit transaction")</h2>
+            </header>
+            <div class="body">
+                <EditForm Model="_formModel" OnValidSubmit="SaveTransactionAsync">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary />
+
+                    <div class="mb-3">
+                        <label class="form-label">Type</label>
+                        <InputSelect class="form-select" @bind-Value="_formModel.Type">
+                            <option value="@TransactionType.Expense">Expense</option>
+                            <option value="@TransactionType.Income">Income</option>
+                        </InputSelect>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Amount</label>
+                        <InputNumber class="form-control" @bind-Value="_formModel.Amount" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Date</label>
+                        <InputDate class="form-control" @bind-Value="_formModel.Date" @bind-Value:format="MM/dd/yyyy" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Category</label>
+                        <InputSelect class="form-select" @bind-Value="_formModel.CategoryId">
+                            <option value="">Uncategorized</option>
+                            @foreach (var category in _categories)
+                            {
+                                <option value="@category.Id">@category.Name</option>
+                            }
+                        </InputSelect>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Notes</label>
+                        <InputTextArea class="form-control" @bind-Value="_formModel.Description" rows="3" />
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(_formError))
+                    {
+                        <div class="alert alert-danger">@_formError</div>
+                    }
+
+                    <div class="modal-actions">
+                        <button type="submit" class="btn btn-primary">Save</button>
+                        <button type="button" class="btn btn-outline-light" @onclick="CloseModal">Cancel</button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    }
+
+    @if (_showDeleteConfirm && _transactionToDelete is not null)
+    {
+        <div class="modal-backdrop-custom" @onclick="CancelDelete"></div>
+        <div class="modal-custom confirmation" @onclick:stopPropagation="true">
+            <header>
+                <h2>Delete transaction</h2>
+            </header>
+            <div class="body">
+                <p>Are you sure you want to delete this transaction?</p>
+                <p class="small text-muted">
+                    @(_transactionToDelete.Date.ToString("MM/dd/yyyy")) ·
+                    @(_transactionToDelete.Category?.Name ?? "Uncategorized") ·
+                    @_transactionToDelete.Amount.ToString("C2")
+                </p>
+                <div class="modal-actions">
+                    <button class="btn btn-danger" @onclick="DeleteConfirmedAsync">Delete</button>
+                    <button class="btn btn-outline-light" @onclick="CancelDelete">Cancel</button>
+                </div>
+            </div>
+        </div>
+    }
+</section>
+
+@code {
+    private const int PageSize = 10;
+
+    private bool _isLoading = true;
+    private List<Transaction> _allTransactions = new();
+    private List<Transaction> _pagedTransactions = new();
+    private List<Category> _categories = new();
+
+    private int _currentPage = 1;
+    private int _totalPages = 1;
+
+    // Filters
+    private DateTime? _filterFrom;
+    private DateTime? _filterTo;
+    private string? _filterCategoryId;
+    private string? _filterType;
+
+    // Modal state
+    private bool _showModal;
+    private Guid? _editingTransactionId;
+    private TransactionFormModel _formModel = new();
+    private string? _formError;
+
+    // Delete confirmation
+    private bool _showDeleteConfirm;
+    private Transaction? _transactionToDelete;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadInitialDataAsync();
+    }
+
+    private async Task LoadInitialDataAsync()
+    {
+        _isLoading = true;
+        try
+        {
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+
+            if (user.Identity?.IsAuthenticated != true)
+            {
+                _allTransactions.Clear();
+                _pagedTransactions.Clear();
+                return;
+            }
+
+            var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                             ?? user.FindFirst(ClaimTypes.Name)?.Value;
+
+            if (!Guid.TryParse(userIdClaim, out var userId))
+            {
+                _allTransactions.Clear();
+                _pagedTransactions.Clear();
+                return;
+            }
+
+            _categories = (await CategoryService.GetForUserAsync(userId)).ToList();
+
+            // Default filter: current month
+            var today = DateTime.Today;
+            _filterFrom = new DateTime(today.Year, today.Month, 1);
+            _filterTo = _filterFrom.Value.AddMonths(1).AddDays(-1);
+
+            await ReloadTransactionsAsync(userId);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task ReloadTransactionsAsync(Guid userId)
+    {
+        Guid? categoryId = null;
+        if (Guid.TryParse(_filterCategoryId, out var parsedCategoryId))
+        {
+            categoryId = parsedCategoryId;
+        }
+
+        TransactionType? type = null;
+        if (!string.IsNullOrWhiteSpace(_filterType) &&
+            Enum.TryParse<TransactionType>(_filterType, out var parsedType))
+        {
+            type = parsedType;
+        }
+
+        _allTransactions = (await TransactionService.SearchAsync(
+                userId,
+                _filterFrom,
+                _filterTo,
+                categoryId,
+                type))
+            .ToList();
+
+        _currentPage = 1;
+        RecalculatePagination();
+    }
+
+    private async Task ApplyFilters()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                         ?? user.FindFirst(ClaimTypes.Name)?.Value;
+
+        if (!Guid.TryParse(userIdClaim, out var userId))
+        {
+            return;
+        }
+
+        await ReloadTransactionsAsync(userId);
+    }
+
+    private async Task ResetFilters()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                         ?? user.FindFirst(ClaimTypes.Name)?.Value;
+
+        if (!Guid.TryParse(userIdClaim, out var userId))
+        {
+            return;
+        }
+
+        _filterCategoryId = null;
+        _filterType = null;
+
+        var today = DateTime.Today;
+        _filterFrom = new DateTime(today.Year, today.Month, 1);
+        _filterTo = _filterFrom.Value.AddMonths(1).AddDays(-1);
+
+        await ReloadTransactionsAsync(userId);
+    }
+
+    private void RecalculatePagination()
+    {
+        _totalPages = Math.Max(1, (int)Math.Ceiling(_allTransactions.Count / (double)PageSize));
+        var skip = (_currentPage - 1) * PageSize;
+        _pagedTransactions = _allTransactions
+            .Skip(skip)
+            .Take(PageSize)
+            .ToList();
+    }
+
+    private void PreviousPage()
+    {
+        if (_currentPage <= 1) return;
+        _currentPage--;
+        RecalculatePagination();
+    }
+
+    private void NextPage()
+    {
+        if (_currentPage >= _totalPages) return;
+        _currentPage++;
+        RecalculatePagination();
+    }
+
+    private void ShowCreateModal()
+    {
+        _editingTransactionId = null;
+        _formError = null;
+        _formModel = new TransactionFormModel
+        {
+            Type = TransactionType.Expense,
+            Date = DateTime.Today
+        };
+        _showModal = true;
+    }
+
+    private void ShowEditModal(Transaction tx)
+    {
+        _editingTransactionId = tx.Id;
+        _formError = null;
+        _formModel = new TransactionFormModel
+        {
+            Type = tx.Type,
+            Amount = tx.Amount,
+            Date = tx.Date,
+            CategoryId = tx.CategoryId,
+            Description = tx.Description
+        };
+        _showModal = true;
+    }
+
+    private void CloseModal()
+    {
+        _showModal = false;
+    }
+
+    private void ConfirmDelete(Transaction tx)
+    {
+        _transactionToDelete = tx;
+        _showDeleteConfirm = true;
+    }
+
+    private void CancelDelete()
+    {
+        _showDeleteConfirm = false;
+        _transactionToDelete = null;
+    }
+
+    private async Task DeleteConfirmedAsync()
+    {
+        if (_transactionToDelete is null)
+        {
+            return;
+        }
+
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                         ?? user.FindFirst(ClaimTypes.Name)?.Value;
+
+        if (!Guid.TryParse(userIdClaim, out var userId))
+        {
+            return;
+        }
+
+        await TransactionService.DeleteAsync(userId, _transactionToDelete.Id);
+
+        _showDeleteConfirm = false;
+        _transactionToDelete = null;
+
+        await ReloadTransactionsAsync(userId);
+    }
+
+    private async Task SaveTransactionAsync()
+    {
+        _formError = null;
+
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                         ?? user.FindFirst(ClaimTypes.Name)?.Value;
+
+        if (!Guid.TryParse(userIdClaim, out var userId))
+        {
+            _formError = "Unable to determine the current user.";
+            return;
+        }
+
+        try
+        {
+            if (_editingTransactionId is null)
+            {
+                await TransactionService.CreateAsync(
+                    userId,
+                    _formModel.Amount,
+                    _formModel.Date,
+                    _formModel.Type,
+                    _formModel.CategoryId,
+                    _formModel.Description);
+            }
+            else
+            {
+                var existing = await TransactionService.GetByIdAsync(userId, _editingTransactionId.Value);
+                if (existing is null)
+                {
+                    _formError = "Transaction not found.";
+                    return;
+                }
+
+                existing.Amount = _formModel.Amount;
+                existing.Date = _formModel.Date;
+                existing.Type = _formModel.Type;
+                existing.CategoryId = _formModel.CategoryId;
+                existing.Description = _formModel.Description;
+
+                await TransactionService.UpdateAsync(userId, existing);
+            }
+
+            _showModal = false;
+
+            await ReloadTransactionsAsync(userId);
+        }
+        catch (Exception ex)
+        {
+            _formError = ex.Message;
+        }
+    }
+
+    private void ExportCsv()
+    {
+        // Just navigate to the export endpoint. The cookie auth will protect it.
+        var url = "/export/transactions";
+        // Use JS-free navigation; the browser will download the CSV.
+        NavigationManager.NavigateTo(url, forceLoad: true);
+    }
+
+    private sealed class TransactionFormModel
+    {
+        [Required]
+        public TransactionType Type { get; set; } = TransactionType.Expense;
+
+        [Required]
+        [Range(0.01, double.MaxValue, ErrorMessage = "Amount must be greater than zero.")]
+        public decimal Amount { get; set; }
+
+        [Required]
+        public DateTime Date { get; set; } = DateTime.Today;
+
+        public Guid? CategoryId { get; set; }
+
+        [MaxLength(512)]
+        public string? Description { get; set; }
+    }
+}
+
+

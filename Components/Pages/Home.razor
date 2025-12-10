@@ -1,10 +1,304 @@
-﻿@page "/"
-@using Microsoft.AspNetCore.Authorization
-
+@page "/"
+@rendermode InteractiveServer
+@using System.Security.Claims
+@using BudgetEase.Models
+@using BudgetEase.Services
 @attribute [Authorize]
 
-<PageTitle>Home</PageTitle>
+@inject IDashboardService DashboardService
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
-<h1>Hello, world!</h1>
+<PageTitle>Dashboard</PageTitle>
 
-Welcome to your new app.
+@if (_isLoading)
+{
+    <div class="dashboard-loading">
+        <div class="spinner-border text-light" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <span>Loading your finances...</span>
+    </div>
+}
+else if (_summary is null)
+{
+    <div class="dashboard-empty">
+        <h1>Welcome to BudgetEase</h1>
+        <p>Start by adding your first transactions to see your personal finance overview here.</p>
+    </div>
+}
+else
+{
+    <section class="dashboard-root">
+        <header class="dashboard-header">
+            <div>
+                <h1>Overview</h1>
+                <p class="subtitle">A quick look at your money this month.</p>
+            </div>
+            <div class="dashboard-period-controls">
+                <button class="btn btn-sm btn-outline-light" @onclick="PreviousMonth">
+                    ‹
+                </button>
+                <div class="dashboard-period-pill">
+                    @ReferenceMonth.ToString("MMMM yyyy")
+                </div>
+                <button class="btn btn-sm btn-outline-light" @onclick="NextMonth">
+                    ›
+                </button>
+            </div>
+        </header>
+
+        <section class="dashboard-grid">
+            <article class="stat-card income">
+                <header>
+                    <span class="label">Income</span>
+                    @if (_summary.IncomeChangePercent is not null)
+                    {
+                        <span class="pill positive">
+                            @_summary.IncomeChangePercent% vs last month
+                        </span>
+                    }
+                </header>
+                <div class="value">@FormatCurrency(_summary.CurrentIncome)</div>
+                <footer>
+                    <span>Last month: @FormatCurrency(_summary.PreviousIncome)</span>
+                </footer>
+            </article>
+
+            <article class="stat-card expense">
+                <header>
+                    <span class="label">Expenses</span>
+                    @if (_summary.ExpenseChangePercent is not null)
+                    {
+                        var signClass = _summary.ExpenseChangePercent > 0 ? "negative" : "positive";
+                        <span class="pill @signClass">
+                            @_summary.ExpenseChangePercent% vs last month
+                        </span>
+                    }
+                </header>
+                <div class="value">@FormatCurrency(_summary.CurrentExpense)</div>
+                <footer>
+                    <span>Last month: @FormatCurrency(_summary.PreviousExpense)</span>
+                </footer>
+            </article>
+
+            <article class="stat-card net">
+                <header>
+                    <span class="label">Net</span>
+                    @if (_summary.NetChangePercent is not null)
+                    {
+                        var signClass = _summary.NetChangePercent >= 0 ? "positive" : "negative";
+                        <span class="pill @signClass">
+                            @_summary.NetChangePercent% vs last month
+                        </span>
+                    }
+                </header>
+                <div class="value">@FormatCurrency(_summary.CurrentNet)</div>
+                <footer>
+                    <span>Last month: @FormatCurrency(_summary.PreviousNet)</span>
+                </footer>
+            </article>
+        </section>
+
+        <section class="dashboard-lower">
+            <article class="panel recent">
+                <header>
+                    <h2>Recent activity</h2>
+                    <span class="hint">Last 5 transactions</span>
+                </header>
+
+                @if (_summary.RecentTransactions.Count == 0)
+                {
+                    <p class="empty-state">No transactions yet for this month.</p>
+                }
+                else
+                {
+                    <ul class="recent-list">
+                        @foreach (var tx in _summary.RecentTransactions)
+                        {
+                            var sign = tx.Type == TransactionType.Income ? "+" : "-";
+                            var amountClass = tx.Type == TransactionType.Income ? "income" : "expense";
+                            <li>
+                                <div class="main">
+                                    <span class="title">@(tx.CategoryName ?? "Uncategorized")</span>
+                                    @if (!string.IsNullOrWhiteSpace(tx.Description))
+                                    {
+                                        <span class="description">@tx.Description</span>
+                                    }
+                                </div>
+                                <div class="meta">
+                                    <span class="date">@tx.Date.ToString("dd MMM")</span>
+                                    <span class="amount @amountClass">@sign@FormatCurrency(tx.Amount)</span>
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </article>
+
+            <article class="panel categories">
+                <header>
+                    <h2>Spending by category</h2>
+                    <span class="hint">Only expenses for this month</span>
+                </header>
+
+                @if (_summary.CategoryBreakdown.Count == 0)
+                {
+                    <p class="empty-state">No categorized expenses yet this month.</p>
+                }
+                else
+                {
+                    <ul class="category-list">
+                        @foreach (var cat in _summary.CategoryBreakdown)
+                        {
+                            var color = string.IsNullOrWhiteSpace(cat.ColorHex) ? "#4b5563" : cat.ColorHex;
+                            <li>
+                                <div class="bullet" style="background: @color;"></div>
+                                <div class="main">
+                                    <span class="title">@cat.CategoryName</span>
+                                    <span class="sub">@cat.PercentageOfTotal% of monthly spend</span>
+                                </div>
+                                <div class="value">
+                                    @FormatCurrency(cat.TotalAmount)
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </article>
+        </section>
+
+        <section class="dashboard-charts">
+            <article class="panel chart-income-expense">
+                <header>
+                    <h2>Income vs expenses</h2>
+                    <span class="hint">This month totals</span>
+                </header>
+                <div class="chart-bars">
+                    <div class="bar-group">
+                        <span class="label">Income</span>
+                        <div class="bar-track">
+                            <div class="bar income" style="width: @GetBarWidth(_summary.CurrentIncome);"></div>
+                        </div>
+                        <span class="value">@FormatCurrency(_summary.CurrentIncome)</span>
+                    </div>
+                    <div class="bar-group">
+                        <span class="label">Expenses</span>
+                        <div class="bar-track">
+                            <div class="bar expense" style="width: @GetBarWidth(_summary.CurrentExpense);"></div>
+                        </div>
+                        <span class="value">@FormatCurrency(_summary.CurrentExpense)</span>
+                    </div>
+                </div>
+            </article>
+        </section>
+    </section>
+}
+
+@code {
+    private bool _isLoading = true;
+    private DashboardSummary? _summary;
+
+    private DateOnly ReferenceMonth { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isLoading = true;
+        try
+        {
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+
+            if (user.Identity?.IsAuthenticated != true)
+            {
+                _summary = null;
+                return;
+            }
+
+            var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                             ?? user.FindFirst(ClaimTypes.Name)?.Value;
+
+            if (!Guid.TryParse(userIdClaim, out var userId))
+            {
+                _summary = null;
+                return;
+            }
+
+            _summary = await DashboardService.GetSummaryAsync(userId, ReferenceMonth);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void PreviousMonth()
+    {
+        ReferenceMonth = ReferenceMonth.AddMonths(-1);
+        _ = ReloadSummaryAsync();
+    }
+
+    private void NextMonth()
+    {
+        ReferenceMonth = ReferenceMonth.AddMonths(1);
+        _ = ReloadSummaryAsync();
+    }
+
+    private async Task ReloadSummaryAsync()
+    {
+        _isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+
+            if (user.Identity?.IsAuthenticated != true)
+            {
+                _summary = null;
+                return;
+            }
+
+            var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                             ?? user.FindFirst(ClaimTypes.Name)?.Value;
+
+            if (!Guid.TryParse(userIdClaim, out var userId))
+            {
+                _summary = null;
+                return;
+            }
+
+            _summary = await DashboardService.GetSummaryAsync(userId, ReferenceMonth);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private string GetBarWidth(decimal value)
+    {
+        if (_summary is null)
+        {
+            return "0%";
+        }
+
+        var max = Math.Max(_summary.CurrentIncome, _summary.CurrentExpense);
+        if (max <= 0)
+        {
+            return "0%";
+        }
+
+        var ratio = (double)(value / max);
+        var pct = Math.Max(8, Math.Min(100, (int)Math.Round(ratio * 100)));
+        return $"{pct}%";
+    }
+
+    private static string FormatCurrency(decimal value)
+    {
+        // Simple formatting for now – later we can honor UserSettings.Currency.
+        return value.ToString("C2");
+    }
+}
+
+

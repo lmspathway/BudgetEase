@@ -1,0 +1,329 @@
+@page "/categories"
+@rendermode InteractiveServer
+@using System.Security.Claims
+@using System.ComponentModel.DataAnnotations
+@using BudgetEase.Models
+@using BudgetEase.Services
+@attribute [Authorize]
+
+@inject ICategoryService CategoryService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>Categories</PageTitle>
+
+<section class="categories-root">
+    <header class="categories-header">
+        <div>
+            <h1>Categories</h1>
+            <p class="subtitle">Organize how your money is grouped.</p>
+        </div>
+    </header>
+
+    <article class="panel create">
+        <h2>Create category</h2>
+        <EditForm Model="_createModel" OnValidSubmit="CreateCategoryAsync">
+            <DataAnnotationsValidator />
+
+            <div class="row g-2 align-items-end">
+                <div class="col-md-5">
+                    <label class="form-label">Name</label>
+                    <InputText class="form-control" @bind-Value="_createModel.Name" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Color (optional)</label>
+                    <InputText class="form-control" @bind-Value="_createModel.ColorHex" placeholder="#3B82F6" />
+                </div>
+                <div class="col-md-3 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary me-2">Add</button>
+                    <button type="button" class="btn btn-outline-light" @onclick="ResetCreateForm">Clear</button>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_createError))
+            {
+                <div class="alert alert-danger mt-2">@_createError</div>
+            }
+        </EditForm>
+    </article>
+
+    <article class="panel list">
+        <header>
+            <h2>All categories</h2>
+            <span class="hint">Global defaults first, then your personal ones.</span>
+        </header>
+
+        @if (_isLoading)
+        {
+            <p class="empty-state">Loading categories...</p>
+        }
+        else if (_categories.Count == 0)
+        {
+            <p class="empty-state">No categories defined yet.</p>
+        }
+        else
+        {
+            <ul class="category-items">
+                @foreach (var cat in _categories)
+                {
+                    var isGlobal = cat.IsDefaultGlobal || cat.UserId is null;
+                    var isEditing = _editingCategoryId == cat.Id;
+                    var color = string.IsNullOrWhiteSpace(cat.ColorHex) ? "#4b5563" : cat.ColorHex;
+                    <li>
+                        <div class="bullet" style="background: @color;"></div>
+
+                        @if (isEditing)
+                        {
+                            <EditForm Model="_editModel" OnValidSubmit="@(() => SaveEditAsync(cat))">
+                                <div class="edit-inline">
+                                    <InputText class="form-control form-control-sm" @bind-Value="_editModel.Name" />
+                                    <InputText class="form-control form-control-sm color-input" @bind-Value="_editModel.ColorHex" />
+                                    <button type="submit" class="btn btn-sm btn-primary">Save</button>
+                                    <button type="button" class="btn btn-sm btn-outline-light" @onclick="CancelEdit">Cancel</button>
+                                </div>
+                            </EditForm>
+                        }
+                        else
+                        {
+                            <div class="main">
+                                <span class="title">@cat.Name</span>
+                                <span class="sub">
+                                    @(isGlobal ? "Global default · available to all users" : "Personal category")
+                                </span>
+                            </div>
+                            <div class="actions">
+                                @if (!isGlobal)
+                                {
+                                    <button class="btn btn-sm btn-outline-light me-1" @onclick="@(() => StartEdit(cat))">Edit</button>
+                                    <button class="btn btn-sm btn-outline-danger" @onclick="@(() => ConfirmDelete(cat))">Delete</button>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">Default</span>
+                                }
+                            </div>
+                        }
+                    </li>
+                }
+            </ul>
+
+            @if (!string.IsNullOrEmpty(_listError))
+            {
+                <div class="alert alert-danger mt-2">@_listError</div>
+            }
+        }
+    </article>
+
+    @if (_showDeleteConfirm && _categoryToDelete is not null)
+    {
+        <div class="modal-backdrop-custom" @onclick="CancelDelete"></div>
+        <div class="modal-custom confirmation" @onclick:stopPropagation="true">
+            <header>
+                <h2>Delete category</h2>
+            </header>
+            <div class="body">
+                <p>Are you sure you want to delete the category "@_categoryToDelete.Name"?</p>
+                <p class="small text-muted">
+                    Categories that are used by transactions cannot be deleted.
+                </p>
+                <div class="modal-actions">
+                    <button class="btn btn-danger" @onclick="DeleteConfirmedAsync">Delete</button>
+                    <button class="btn btn-outline-light" @onclick="CancelDelete">Cancel</button>
+                </div>
+            </div>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _isLoading = true;
+    private List<Category> _categories = new();
+
+    private readonly CategoryFormModel _createModel = new();
+    private CategoryFormModel _editModel = new();
+
+    private Guid? _editingCategoryId;
+    private string? _createError;
+    private string? _listError;
+
+    private bool _showDeleteConfirm;
+    private Category? _categoryToDelete;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _isLoading = true;
+        _listError = null;
+        try
+        {
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+
+            if (user.Identity?.IsAuthenticated != true)
+            {
+                _categories.Clear();
+                return;
+            }
+
+            var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                             ?? user.FindFirst(ClaimTypes.Name)?.Value;
+
+            if (!Guid.TryParse(userIdClaim, out var userId))
+            {
+                _categories.Clear();
+                return;
+            }
+
+            _categories = (await CategoryService.GetForUserAsync(userId)).ToList();
+        }
+        catch (Exception ex)
+        {
+            _listError = ex.Message;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task CreateCategoryAsync()
+    {
+        _createError = null;
+
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                         ?? user.FindFirst(ClaimTypes.Name)?.Value;
+
+        if (!Guid.TryParse(userIdClaim, out var userId))
+        {
+            _createError = "Unable to determine the current user.";
+            return;
+        }
+
+        try
+        {
+            await CategoryService.CreateAsync(userId, _createModel.Name, _createModel.ColorHex);
+            ResetCreateForm();
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _createError = ex.Message;
+        }
+    }
+
+    private void ResetCreateForm()
+    {
+        _createModel.Name = string.Empty;
+        _createModel.ColorHex = null;
+        _createError = null;
+    }
+
+    private void StartEdit(Category cat)
+    {
+        _editingCategoryId = cat.Id;
+        _editModel = new CategoryFormModel
+        {
+            Name = cat.Name,
+            ColorHex = cat.ColorHex
+        };
+        _listError = null;
+    }
+
+    private void CancelEdit()
+    {
+        _editingCategoryId = null;
+    }
+
+    private async Task SaveEditAsync(Category cat)
+    {
+        if (_editingCategoryId != cat.Id)
+        {
+            return;
+        }
+
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                         ?? user.FindFirst(ClaimTypes.Name)?.Value;
+
+        if (!Guid.TryParse(userIdClaim, out var userId))
+        {
+            _listError = "Unable to determine the current user.";
+            return;
+        }
+
+        try
+        {
+            await CategoryService.RenameAsync(userId, cat.Id, _editModel.Name);
+            // Update color as well by creating a simple update via service create+delete in future;
+            // for now, only name is editable to keep service simple.
+            _editingCategoryId = null;
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _listError = ex.Message;
+        }
+    }
+
+    private void ConfirmDelete(Category cat)
+    {
+        _categoryToDelete = cat;
+        _showDeleteConfirm = true;
+        _listError = null;
+    }
+
+    private void CancelDelete()
+    {
+        _categoryToDelete = null;
+        _showDeleteConfirm = false;
+    }
+
+    private async Task DeleteConfirmedAsync()
+    {
+        if (_categoryToDelete is null)
+        {
+            return;
+        }
+
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                         ?? user.FindFirst(ClaimTypes.Name)?.Value;
+
+        if (!Guid.TryParse(userIdClaim, out var userId))
+        {
+            _listError = "Unable to determine the current user.";
+            return;
+        }
+
+        try
+        {
+            await CategoryService.DeleteAsync(userId, _categoryToDelete.Id);
+            _showDeleteConfirm = false;
+            _categoryToDelete = null;
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _listError = ex.Message;
+        }
+    }
+
+    private sealed class CategoryFormModel
+    {
+        [Required]
+        [StringLength(64)]
+        public string Name { get; set; } = string.Empty;
+
+        [StringLength(16)]
+        public string? ColorHex { get; set; }
+    }
+}
+
+

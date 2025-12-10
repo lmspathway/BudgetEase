@@ -1,0 +1,20 @@
+.error-page.server-error {
+    text-align: center;
+    padding: 4rem 1rem;
+}
+
+.error-page.server-error h1 {
+    font-size: 2.4rem;
+    margin-bottom: 0.5rem;
+}
+
+.error-page.server-error .lead {
+    font-size: 1.1rem;
+    margin-bottom: 0.75rem;
+}
+
+.error-page.server-error .text-muted {
+    font-size: 0.9rem;
+}
+
+

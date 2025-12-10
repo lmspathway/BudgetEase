@@ -1,0 +1,243 @@
+@page "/settings"
+@rendermode InteractiveServer
+@using System.Security.Claims
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Identity
+@using BudgetEase.Models
+@using BudgetEase.Services
+@attribute [Authorize]
+
+@inject ISettingsService SettingsService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject UserManager<ApplicationUser> UserManager
+
+<PageTitle>Settings</PageTitle>
+
+<section class="settings-root">
+    <header class="settings-header">
+        <div>
+            <h1>Profile & settings</h1>
+            <p class="subtitle">Adjust how BudgetEase looks and behaves for you.</p>
+        </div>
+    </header>
+
+    @if (_isLoading)
+    {
+        <div class="settings-loading">
+            <div class="spinner-border spinner-border-sm text-light" role="status"></div>
+            <span>Loading settings...</span>
+        </div>
+    }
+    else if (_loadError is not null)
+    {
+        <div class="alert alert-danger">@_loadError</div>
+    }
+    else if (_model is not null)
+    {
+        <EditForm Model="_model" OnValidSubmit="SaveAsync">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <article class="panel">
+                <h2>Profile</h2>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Name</label>
+                        <InputText class="form-control" @bind-Value="_model.DisplayName" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Email</label>
+                        <InputText class="form-control" @bind-Value="_model.Email" disabled />
+                        <span class="form-text text-muted">Email comes from your login and cannot be changed here.</span>
+                    </div>
+                </div>
+            </article>
+
+            <article class="panel">
+                <h2>Preferences</h2>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Currency</label>
+                        <InputSelect class="form-select" @bind-Value="_model.Currency">
+                            <option value="USD">USD ($)</option>
+                            <option value="EUR">EUR (€)</option>
+                            <option value="BRL">BRL (R$)</option>
+                        </InputSelect>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Theme</label>
+                        <InputSelect class="form-select" @bind-Value="_model.Theme">
+                            <option value="system">System</option>
+                            <option value="light">Light</option>
+                            <option value="dark">Dark</option>
+                        </InputSelect>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Time zone</label>
+                        <InputText class="form-control" @bind-Value="_model.TimeZone" />
+                        <span class="form-text text-muted">Example: UTC, America/New_York.</span>
+                    </div>
+                </div>
+            </article>
+
+            <div class="settings-actions">
+                <button type="submit" class="btn btn-primary" disabled="@_isSaving">
+                    @(_isSaving ? "Saving..." : "Save changes")
+                </button>
+
+                @if (!string.IsNullOrEmpty(_saveMessage))
+                {
+                    <span class="save-message">@_saveMessage</span>
+                }
+            </div>
+        </EditForm>
+    }
+</section>
+
+@code {
+    private bool _isLoading = true;
+    private bool _isSaving;
+
+    private SettingsFormModel? _model;
+    private string? _loadError;
+    private string? _saveMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _isLoading = true;
+        _loadError = null;
+        _saveMessage = null;
+
+        try
+        {
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+
+            if (user.Identity?.IsAuthenticated != true)
+            {
+                _loadError = "You must be signed in to edit your settings.";
+                return;
+            }
+
+            var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                             ?? user.FindFirst(ClaimTypes.Name)?.Value;
+
+            if (!Guid.TryParse(userIdClaim, out var userId))
+            {
+                _loadError = "Unable to determine the current user.";
+                return;
+            }
+
+            var appUser = await UserManager.FindByIdAsync(userId.ToString());
+            if (appUser is null)
+            {
+                _loadError = "User not found.";
+                return;
+            }
+
+            var settings = await SettingsService.GetOrCreateAsync(userId);
+
+            _model = new SettingsFormModel
+            {
+                DisplayName = appUser.DisplayName,
+                Email = appUser.Email ?? string.Empty,
+                Currency = settings.Currency,
+                Theme = settings.Theme,
+                TimeZone = settings.TimeZone
+            };
+        }
+        catch (Exception ex)
+        {
+            _loadError = ex.Message;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_model is null)
+        {
+            return;
+        }
+
+        _isSaving = true;
+        _saveMessage = null;
+
+        try
+        {
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+
+            var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                             ?? user.FindFirst(ClaimTypes.Name)?.Value;
+
+            if (!Guid.TryParse(userIdClaim, out var userId))
+            {
+                _saveMessage = "Unable to determine the current user.";
+                return;
+            }
+
+            // Update user profile
+            var appUser = await UserManager.FindByIdAsync(userId.ToString());
+            if (appUser is null)
+            {
+                _saveMessage = "User not found.";
+                return;
+            }
+
+            appUser.DisplayName = _model.DisplayName;
+            var result = await UserManager.UpdateAsync(appUser);
+            if (!result.Succeeded)
+            {
+                _saveMessage = string.Join(' ', result.Errors.Select(e => e.Description));
+                return;
+            }
+
+            // Update settings
+            await SettingsService.UpdateAsync(userId, _model.Currency, _model.Theme, _model.TimeZone);
+
+            _saveMessage = "Settings saved.";
+        }
+        catch (Exception ex)
+        {
+            _saveMessage = ex.Message;
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private sealed class SettingsFormModel
+    {
+        [Required]
+        [StringLength(128)]
+        public string DisplayName { get; set; } = string.Empty;
+
+        [Required]
+        [EmailAddress]
+        public string Email { get; set; } = string.Empty;
+
+        [Required]
+        [StringLength(16)]
+        public string Currency { get; set; } = "USD";
+
+        [Required]
+        [StringLength(32)]
+        public string Theme { get; set; } = "system";
+
+        [Required]
+        [StringLength(128)]
+        public string TimeZone { get; set; } = "UTC";
+    }
+}
+
+

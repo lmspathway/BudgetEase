@@ -1,0 +1,106 @@
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.JSInterop
+
+@inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
+
+<AuthorizeView>
+    <Authorized Context="authContext">
+        <div class="app-header-profile">
+            <button class="avatar-placeholder @(_showDropdown ? "active" : "")"
+                    type="button"
+                    @onclick="ToggleDropdown"
+                    @onclick:stopPropagation="true">
+                @GetUserInitial(authContext.User)
+            </button>
+            @if (_showDropdown)
+            {
+                <div class="dropdown-overlay" @onclick="CloseDropdown"></div>
+                <div class="dropdown-menu-custom" @onclick:stopPropagation="true">
+                    <div class="dropdown-item-text">
+                        Signed in as @GetUserDisplayName(authContext.User)
+                    </div>
+                    <hr class="dropdown-divider" />
+                    <button class="dropdown-item" @onclick="HandleLogout">Logout</button>
+                </div>
+            }
+        </div>
+    </Authorized>
+</AuthorizeView>
+
+@code {
+    private bool _showDropdown = false;
+
+    protected override void OnInitialized()
+    {
+        // Fechar dropdown quando navegar
+        Navigation.LocationChanged += (sender, args) => _showDropdown = false;
+    }
+
+    private void ToggleDropdown()
+    {
+        _showDropdown = !_showDropdown;
+        StateHasChanged();
+    }
+
+    private void CloseDropdown()
+    {
+        _showDropdown = false;
+        StateHasChanged();
+    }
+
+    private async Task HandleLogout()
+    {
+        _showDropdown = false;
+        
+        try
+        {
+            // Usar JavaScript para fazer POST que inclui cookies automaticamente
+            var response = await JSRuntime.InvokeAsync<string>("logoutUser");
+
+            if (response == "success")
+            {
+                // Cookie foi removido, redireciona
+                Navigation.NavigateTo("/login", forceLoad: true);
+            }
+            else
+            {
+                // Em caso de erro, ainda redireciona para login
+                Navigation.NavigateTo("/login", forceLoad: true);
+            }
+        }
+        catch
+        {
+            // Em caso de exceção, redireciona para login
+            Navigation.NavigateTo("/login", forceLoad: true);
+        }
+    }
+
+    private string GetUserInitial(System.Security.Claims.ClaimsPrincipal user)
+    {
+        if (user?.Identity?.IsAuthenticated != true)
+        {
+            return "BE";
+        }
+
+        var name = user.Identity.Name;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "BE";
+        }
+
+        return char.ToUpperInvariant(name[0]).ToString();
+    }
+
+    private string GetUserDisplayName(System.Security.Claims.ClaimsPrincipal user)
+    {
+        if (user?.Identity?.IsAuthenticated != true)
+        {
+            return "Guest";
+        }
+
+        return user.Identity.Name ?? "User";
+    }
+}
+

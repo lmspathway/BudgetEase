@@ -122,6 +122,17 @@ app.MapPost("/auth/login", async (
         return Results.BadRequest("Invalid email or password.");
     });
 
+// Minimal API endpoint for logout using Identity + cookies.
+app.MapPost("/auth/logout", async (SignInManager<ApplicationUser> signInManager) =>
+    {
+        // Fazer logout (remove o cookie de sessão)
+        await signInManager.SignOutAsync();
+        
+        // Cookie foi removido pelo SignInManager no HttpContext
+        // O cookie será removido automaticamente na resposta HTTP
+        return Results.Ok();
+    });
+
 app.Run();
 
 public record LoginRequest(string Email, string Password, bool RememberMe);
